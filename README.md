@@ -7,7 +7,7 @@ Usage : ./mass\_dump.sh '-h server -uroot -psecret' database1 database2 database
 * connection string
 * database list to dump
 
-### mass\_dump.sh
+### mass\_import.sh
 Usage : ./mass\_import.sh 4 '-h server -uroot -psecret' database1 database2 database3
 * maximum threads
 * connection\_string
