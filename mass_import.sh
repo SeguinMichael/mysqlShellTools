@@ -2,12 +2,24 @@
 
 #####
 #
-# Usage : ./mass_import.sh 80 "-h server -uroot -psecret" database1 database2 database3
+# Usage :
+#			./mass_import.sh 80 "-h server -uroot -psecret" database1 database2 database3
+#			./mass_import.sh resume 80 "-h server -uroot -psecret" database1 database2 database3
 #
 #####
 
 MAX_THREAD=$1
+if [ "$MAX_THREAD" = "resume" ]
+then
+	RESUME="true"
+	shift
+	MAX_THREAD=$1
+	echo "Resume option activated"
+else
+	RESUME="false"
+fi
 shift
+
 CONNECTION_STRING=$1
 shift
 DATABASE_LIST=$@
@@ -18,40 +30,55 @@ DATA_PATH="/data/sqlDump"
 if [ -z "$MAX_THREAD" -o -z "$CONNECTION_STRING" -o -z "$DATABASE_LIST" ]
 then
 	echo "Usage : ./mass_import.sh 4 '-h server -uroot -psecret' database1 database2 database3"
+	echo "Usage : ./mass_import.sh resume 4 '-h server -uroot -psecret' database1 database2 database3"
 	exit;
 fi
 
 MYSQL_CMD="mysql -C $CONNECTION_STRING"
+LS_CMD="ls "
+for DATABASE in $DATABASE_LIST
+do
+	LS_CMD="${LS_CMD} ${DATA_PATH}/split/${DATABASE}_data_*sql"
+done
 
 mkdir -p ${DATA_PATH}/split
 
 LOG_FILE=import.log
 > $LOG_FILE
 
-echo "[data] Splitting data file in background..."
-for DATABASE in $DATABASE_LIST
-do
-	rm ${DATA_PATH}/split/${DATABASE}_data_*.sql 2>/dev/null
-	head -n 17 ${DATA_PATH}/${DATABASE}_data.sql > ${DATA_PATH}/${DATABASE}_header.sql
-	echo "SET AUTOCOMMIT=0;" >> ${DATA_PATH}/${DATABASE}_header.sql
-	echo "BEGIN;" >> ${DATA_PATH}/${DATABASE}_header.sql
-	echo "COMMIT;" > ${DATA_PATH}/${DATABASE}_footer.sql
-	tail -n 11 ${DATA_PATH}/${DATABASE}_data.sql >> ${DATA_PATH}/${DATABASE}_footer.sql
-	split -a 5 -d -n l/$(( $MAX_THREAD * 10 )) --additional-suffix=.sql ${DATA_PATH}/${DATABASE}_data.sql ${DATA_PATH}/split/${DATABASE}_data_
-done &
-PID_SPLIT=$!
+if [ "$RESUME" = "false" ]
+then
+	echo "[data] Splitting data file in background..."
+	for DATABASE in $DATABASE_LIST
+	do
+		rm ${DATA_PATH}/split/${DATABASE}_data_*.sql 2>/dev/null
+		lz4cat ${DATA_PATH}/${DATABASE}_data.sql.lz4 | head -n 17 > ${DATA_PATH}/${DATABASE}_header.sql
+		echo "SET AUTOCOMMIT=0;" >> ${DATA_PATH}/${DATABASE}_header.sql
+		echo "BEGIN;" >> ${DATA_PATH}/${DATABASE}_header.sql
+		echo "COMMIT;" > ${DATA_PATH}/${DATABASE}_footer.sql
+
+		#Perf => assuming struct footer is similar to data footer
+		lz4cat ${DATA_PATH}/${DATABASE}_struct.sql.lz4 | tail -n 11 >> ${DATA_PATH}/${DATABASE}_footer.sql
+
+		lz4cat ${DATA_PATH}/${DATABASE}_data.sql.lz4 | split -a 6 -d -l 5 -u --additional-suffix=.sql - ${DATA_PATH}/split/${DATABASE}_data_
+	done &
+	PID_SPLIT=$!
+fi
 
 echo "Warning: the specified databases will be restored in 10 seconds"
 sleep 10
 
-echo "[schema] Importing schemas..."
-for DATABASE in $DATABASE_LIST
-do
-	echo "[schema] $DATABASE (2 times with -f in case of critical table dependencies) ..."
-	$MYSQL_CMD -f $DATABASE < ${DATA_PATH}/${DATABASE}_struct.sql
-	$MYSQL_CMD -f $DATABASE < ${DATA_PATH}/${DATABASE}_struct.sql
-	echo "[schema] $DATABASE ok"
-done
+if [ "$RESUME" = "false" ]
+then
+	echo "[schema] Importing schemas..."
+	for DATABASE in $DATABASE_LIST
+	do
+		echo "[schema] $DATABASE (2 times with -f in case of critical table dependencies) ..."
+		lz4cat ${DATA_PATH}/${DATABASE}_struct.sql.lz4 | $MYSQL_CMD -f $DATABASE
+		lz4cat ${DATA_PATH}/${DATABASE}_struct.sql.lz4 | $MYSQL_CMD -f $DATABASE
+		echo "[schema] $DATABASE ok"
+	done
+fi
 
 export MYSQL_CMD DATA_PATH
 
@@ -69,20 +96,24 @@ function go_mysql() {
 export -f go_mysql
 
 echo "[data] Importing 'ready to import' data"
-while [ -n "$(ls ${DATA_PATH}/split/)" ]
+while [ -n "$($LS_CMD)" ]
 do
-	parallel --retries 5 --eta --progress --jobs $MAX_THREAD --joblog $LOG_FILE "go_mysql {1}" ::: $(ls ${DATA_PATH}/split/* | sort -R)
+	parallel --retries 5 --eta --progress --jobs $MAX_THREAD --joblog $LOG_FILE "go_mysql {1}" ::: $($LS_CMD | sort -R)
 	sleep 5
 done
 
-wait $PID_SPLIT
+if [ "$RESUME" = "false" ]
+then
+	wait $PID_SPLIT
+fi
 
 echo "[data] Importing remaining data"
-while [ -n "$(ls ${DATA_PATH}/split/)" ]
+while [ -n "$($LS_CMD)" ]
 do
-	parallel --retries 5 --eta --progress --jobs $MAX_THREAD --joblog $LOG_FILE "go_mysql {1}" ::: $(ls ${DATA_PATH}/split/* | sort -R)
+	parallel --retries 5 --eta --progress --jobs $MAX_THREAD --joblog $LOG_FILE "go_mysql {1}" ::: $($LS_CMD | sort -R)
 done
 
 rm ${DATA_PATH}/*_header.sql ${DATA_PATH}/*_footer.sql
 
-echo "date debut=$DATE_DEBUT ; date fin=$(date)"
+echo "Time stats :"
+echo "FROM $DATE_DEBUT TO $(date)"
