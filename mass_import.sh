@@ -35,11 +35,7 @@ then
 fi
 
 MYSQL_CMD="mysql -C $CONNECTION_STRING"
-LS_CMD="ls "
-for DATABASE in $DATABASE_LIST
-do
-	LS_CMD="${LS_CMD} ${DATA_PATH}/split/${DATABASE}_data_*sql"
-done
+LS_CMD="ls ${DATA_PATH}/split/"'*'" | egrep '(${DATABASE_LIST// /|})_data_[0-9]"'*'".sql'"
 
 mkdir -p ${DATA_PATH}/split
 
@@ -63,6 +59,8 @@ then
 		lz4cat ${DATA_PATH}/${DATABASE}_data.sql.lz4 | split -a 6 -d -l 5 -u --additional-suffix=.sql - ${DATA_PATH}/split/${DATABASE}_data_
 	done &
 	PID_SPLIT=$!
+	echo split PID = $PID_SPLIT
+	trap "{ ps $PID_SPLIT >/dev/null && ( kill $PID_SPLIT ; echo 'Split killed' ) || echo 'Split finished normally. Resume is safe' ; exit 255; }" SIGTERM SIGKILL SIGABRT EXIT
 fi
 
 echo "Warning: the specified databases will be restored in 10 seconds"
@@ -96,21 +94,22 @@ function go_mysql() {
 export -f go_mysql
 
 echo "[data] Importing 'ready to import' data"
-while [ -n "$($LS_CMD)" ]
+while [ -n "$(eval $LS_CMD)" ]
 do
-	parallel --retries 5 --eta --progress --jobs $MAX_THREAD --joblog $LOG_FILE "go_mysql {1}" ::: $($LS_CMD | sort -R)
+	parallel --retries 5 --eta --progress --jobs $MAX_THREAD --joblog $LOG_FILE "go_mysql {1}" ::: $(eval $LS_CMD | sort -R)
 	sleep 5
 done
 
 if [ "$RESUME" = "false" ]
 then
+	echo "Waiting for split..."
 	wait $PID_SPLIT
 fi
 
 echo "[data] Importing remaining data"
-while [ -n "$($LS_CMD)" ]
+while [ -n "$(eval $LS_CMD)" ]
 do
-	parallel --retries 5 --eta --progress --jobs $MAX_THREAD --joblog $LOG_FILE "go_mysql {1}" ::: $($LS_CMD | sort -R)
+	parallel --retries 5 --eta --progress --jobs $MAX_THREAD --joblog $LOG_FILE "go_mysql {1}" ::: $(eval $LS_CMD | sort -R)
 done
 
 rm ${DATA_PATH}/*_header.sql ${DATA_PATH}/*_footer.sql
