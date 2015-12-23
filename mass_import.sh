@@ -1,41 +1,78 @@
 #!/bin/bash
 
-#####
-#
-# Usage :
-#			./mass_import.sh 80 "-h server -uroot -psecret" database1 database2 database3
-#			./mass_import.sh resume 80 "-h server -uroot -psecret" database1 database2 database3
-#
-#####
+function usage() {
+	echo "
+	Usage :
+		./mass_import.sh [OPTIONS] database1 database2 database3 [...]
+			-d DATA_PATH <= directory to the data storage
+			-n MAX_THREAD <= Multithreading mode
+			-r <= resume mode (don't split data file, and read files from the data path)
+			-s \"-h server1 -uroot\" <= server1
+			-s \"-h server2 -uroot\" <= server2
+			-s [...]
+"
 
-MAX_THREAD=$1
-if [ "$MAX_THREAD" = "resume" ]
-then
-	RESUME="true"
-	shift
-	MAX_THREAD=$1
-	echo "Resume option activated"
-else
-	RESUME="false"
-fi
-shift
-
-CONNECTION_STRING=$1
-shift
-DATABASE_LIST=$@
+}
 
 DATE_DEBUT=$(date)
+
+MYSQL_CMD="mysql -C "
+RESUME="false"
+MAX_THREAD=1
 DATA_PATH="/data/sqlDump"
 
-if [ -z "$MAX_THREAD" -o -z "$CONNECTION_STRING" -o -z "$DATABASE_LIST" ]
+declare -a CONNECTION_STRING_LIST
+EXPORT_CONNECTION_STRING_LIST=""
+
+CONNECTION_STRING_LIST=()
+while getopts "hd:n:rs:" option
+do
+	case $option in
+		h)
+			usage
+			exit
+			;;
+		d)
+			DATA_PATH=$OPTARG
+			;;
+		n)
+			MAX_THREAD=$OPTARG
+			;;
+		r)
+			RESUME="true"
+			;;
+		s)
+			CONNECTION_STRING_LIST+=("$OPTARG")
+			;;
+		\?)
+			exit 1
+			;;
+	esac
+done
+shift $((OPTIND-1))
+
+echo Options activated :
+echo ___ data path : $DATA_PATH
+echo ___ resume : $RESUME
+echo ___ max threads : $MAX_THREAD
+for key in ${!CONNECTION_STRING_LIST[*]}
+do
+	echo ___ connection : ${CONNECTION_STRING_LIST[$key]}
+done
+EXPORT_CONNECTION_STRING_LIST=$(declare -p CONNECTION_STRING_LIST 2>/dev/null)
+
+DATABASE_LIST=$@
+
+echo ___ databases : $DATABASE_LIST
+
+
+if [ -z "$DATA_PATH" -o -z "$RESUME" -o -z "$MAX_THREAD" -o -z "$EXPORT_CONNECTION_STRING_LIST" -o -z "$DATABASE_LIST" ]
 then
-	echo "Usage : ./mass_import.sh 4 '-h server -uroot -psecret' database1 database2 database3"
-	echo "Usage : ./mass_import.sh resume 4 '-h server -uroot -psecret' database1 database2 database3"
-	exit;
+	usage
+	exit
 fi
 
-MYSQL_CMD="mysql -C $CONNECTION_STRING"
-LS_CMD="ls ${DATA_PATH}/split/"'*'" | egrep '(${DATABASE_LIST// /|})_data_[0-9]"'*'".sql'"
+LS_CMD="ls ${DATA_PATH}/split/"'*'" 2>/dev/null | egrep '(${DATABASE_LIST// /|})_data_[0-9]"'*'".sql'"
 
 mkdir -p ${DATA_PATH}/split
 
@@ -71,24 +108,45 @@ then
 	echo "[schema] Importing schemas..."
 	for DATABASE in $DATABASE_LIST
 	do
-		echo "[schema] $DATABASE (2 times with -f in case of critical table dependencies) ..."
-		lz4cat ${DATA_PATH}/${DATABASE}_struct.sql.lz4 | $MYSQL_CMD -f $DATABASE
-		lz4cat ${DATA_PATH}/${DATABASE}_struct.sql.lz4 | $MYSQL_CMD -f $DATABASE
+		echo "[schema] $DATABASE (2 times per server with -f in case of critical table dependencies) ..."
+		for key in ${!CONNECTION_STRING_LIST[*]}
+		do
+			lz4cat ${DATA_PATH}/${DATABASE}_struct.sql.lz4 | $MYSQL_CMD ${CONNECTION_STRING_LIST[$key]} -f $DATABASE
+			lz4cat ${DATA_PATH}/${DATABASE}_struct.sql.lz4 | $MYSQL_CMD ${CONNECTION_STRING_LIST[$key]} -f $DATABASE
+		done
+
 		echo "[schema] $DATABASE ok"
 	done
 fi
 
-export MYSQL_CMD DATA_PATH
+export MYSQL_CMD DATA_PATH EXPORT_CONNECTION_STRING_LIST
 
 function go_mysql() {
+	eval $EXPORT_CONNECTION_STRING_LIST
 	FILE=$1
 	if [ ! -s $FILE ]
 	then
-		rm $FILE
+		echo "Empty file deleted : $FILE"
+		rm -- $FILE
 	else
 		DATABASE=$(basename $FILE | sed "s/_data.*sql//")
-		lsof $FILE || ( cat ${DATA_PATH}/${DATABASE}_header.sql $FILE ${DATA_PATH}/${DATABASE}_footer.sql \
-			| $MYSQL_CMD $DATABASE && rm $FILE )
+		if lsof $FILE
+		then
+			echo "$FILE is currently locked... Will try later."
+		else
+			removeFile=1
+			for key in ${!CONNECTION_STRING_LIST[*]}
+			do
+				#echo Sending to \'${CONNECTION_STRING_LIST[$key]}\' ...
+				cat ${DATA_PATH}/${DATABASE}_header.sql $FILE ${DATA_PATH}/${DATABASE}_footer.sql | $MYSQL_CMD ${CONNECTION_STRING_LIST[$key]} $DATABASE || removeFile=0
+			done
+			if [ "$removeFile" = "1" ]
+			then
+				rm -- $FILE
+			else
+				echo "An error has occured while importing $FILE ... Will try later."
+			fi
+		fi
 	fi
 }
 export -f go_mysql
