@@ -72,7 +72,7 @@ then
 	exit
 fi
 
-LS_CMD="ls ${DATA_PATH}/split/"'*'" 2>/dev/null | egrep '(${DATABASE_LIST// /|})_data_[0-9]"'*'".sql'"
+LS_CMD="ls ${DATA_PATH}/split/"'*'" 2>/dev/null | egrep '(${DATABASE_LIST// /|})(:.*)*_data_[0-9]"'*'".sql'"
 
 mkdir -p ${DATA_PATH}/split
 
@@ -81,19 +81,34 @@ LOG_FILE=import.log
 
 if [ "$RESUME" = "false" ]
 then
-	echo "[data] Splitting data file in background..."
-	for DATABASE in $DATABASE_LIST
+	echo "[data] Removing old files..."
+	eval $LS_CMD | while read FILE
 	do
-		rm ${DATA_PATH}/split/${DATABASE}_data_*.sql 2>/dev/null
-		lz4cat ${DATA_PATH}/${DATABASE}_data.sql.lz4 | head -n 17 > ${DATA_PATH}/${DATABASE}_header.sql
-		echo "SET AUTOCOMMIT=0;" >> ${DATA_PATH}/${DATABASE}_header.sql
-		echo "BEGIN;" >> ${DATA_PATH}/${DATABASE}_header.sql
-		echo "COMMIT;" > ${DATA_PATH}/${DATABASE}_footer.sql
+		rm -- $FILE
+	done
+	echo "[data] Splitting data files in background..."
+	for FILE in $(ls ${DATA_PATH}/*lz4 2>/dev/null | egrep "(${DATABASE_LIST// /|})(:.*)*_struct.sql.lz4")
+	do
+		STRUCT_FILE=$FILE
+		DATA_FILE=${FILE/_struct.sql.lz4/_data.sql.lz4}
+		HEADER_FILE=${FILE/_struct.sql.lz4/_header.sql}
+		FOOTER_FILE=${FILE/_struct.sql.lz4/_footer.sql}
+		ID=$(basename $STRUCT_FILE | sed "s/_struct.sql.lz4$//")
+
+		#echo $STRUCT_FILE
+		#echo $DATA_FILE
+		#echo $HEADER_FILE
+		#echo $FOOTER_FILE
+
+		lz4cat ${STRUCT_FILE} | head -n 17 > ${HEADER_FILE}
+		echo "SET AUTOCOMMIT=0;" >> ${HEADER_FILE}
+		echo "BEGIN;" >> ${HEADER_FILE}
+		echo "COMMIT;" > ${FOOTER_FILE}
 
 		#Perf => assuming struct footer is similar to data footer
-		lz4cat ${DATA_PATH}/${DATABASE}_struct.sql.lz4 | tail -n 11 >> ${DATA_PATH}/${DATABASE}_footer.sql
+		lz4cat ${STRUCT_FILE} | tail -n 11 >> ${FOOTER_FILE}
 
-		lz4cat ${DATA_PATH}/${DATABASE}_data.sql.lz4 | split -a 6 -d -l 5 -u --additional-suffix=.sql - ${DATA_PATH}/split/${DATABASE}_data_
+		lz4cat ${DATA_FILE} | split -a 6 -d -l 5 -u --additional-suffix=.sql - ${DATA_PATH}/split/${ID}_data_
 	done &
 	PID_SPLIT=$!
 	echo split PID = $PID_SPLIT
@@ -106,16 +121,20 @@ sleep 10
 if [ "$RESUME" = "false" ]
 then
 	echo "[schema] Importing schemas..."
-	for DATABASE in $DATABASE_LIST
+	for FILE in $(ls ${DATA_PATH}/*lz4 2>/dev/null | egrep "(${DATABASE_LIST// /|})(:.*)*_struct.sql.lz4")
 	do
-		echo "[schema] $DATABASE (2 times per server with -f in case of critical table dependencies) ..."
+		STRUCT_FILE=$FILE
+		ID=$(basename $STRUCT_FILE | sed "s/_struct.sql.lz4$//")
+		DATABASE=$(cut -d: -f1 <<< "$ID")
+
+		echo "[schema] $ID (2 times per server with -f in case of critical table dependencies) ..."
 		for key in ${!CONNECTION_STRING_LIST[*]}
 		do
-			lz4cat ${DATA_PATH}/${DATABASE}_struct.sql.lz4 | $MYSQL_CMD ${CONNECTION_STRING_LIST[$key]} -f $DATABASE
-			lz4cat ${DATA_PATH}/${DATABASE}_struct.sql.lz4 | $MYSQL_CMD ${CONNECTION_STRING_LIST[$key]} -f $DATABASE
+			lz4cat ${STRUCT_FILE} | $MYSQL_CMD ${CONNECTION_STRING_LIST[$key]} -f $DATABASE
+			lz4cat ${STRUCT_FILE} | $MYSQL_CMD ${CONNECTION_STRING_LIST[$key]} -f $DATABASE
 		done
 
-		echo "[schema] $DATABASE ok"
+		echo "[schema] $ID ok"
 	done
 fi
 
@@ -124,12 +143,16 @@ export MYSQL_CMD DATA_PATH EXPORT_CONNECTION_STRING_LIST
 function go_mysql() {
 	eval $EXPORT_CONNECTION_STRING_LIST
 	FILE=$1
+
+	DATA_FILE=${FILE}
+	ID=$(basename $DATA_FILE | sed "s/_data.*sql$//")
+	DATABASE=$(cut -d: -f1 <<< "$ID")
+
 	if [ ! -s $FILE ]
 	then
 		echo "Empty file deleted : $FILE"
 		rm -- $FILE
 	else
-		DATABASE=$(basename $FILE | sed "s/_data.*sql//")
 		if lsof $FILE
 		then
 			echo "$FILE is currently locked... Will try later."
@@ -138,7 +161,7 @@ function go_mysql() {
 			for key in ${!CONNECTION_STRING_LIST[*]}
 			do
 				#echo Sending to \'${CONNECTION_STRING_LIST[$key]}\' ...
-				cat ${DATA_PATH}/${DATABASE}_header.sql $FILE ${DATA_PATH}/${DATABASE}_footer.sql | $MYSQL_CMD ${CONNECTION_STRING_LIST[$key]} $DATABASE || removeFile=0
+				cat ${DATA_PATH}/${ID}_header.sql $FILE ${DATA_PATH}/${ID}_footer.sql | $MYSQL_CMD ${CONNECTION_STRING_LIST[$key]} $DATABASE || removeFile=0
 			done
 			if [ "$removeFile" = "1" ]
 			then
