@@ -56,6 +56,12 @@ else
 	DATABASE=$1
 	shift
 	TABLE_LIST=$@
+
+    PARALLEL_TABLE_LIST=""
+    for table in ${TABLE_LIST}
+    do
+        PARALLEL_TABLE_LIST="$PARALLEL_TABLE_LIST ${DATABASE}:${table}"
+    done
 fi
 
 mkdir -p $DATA_PATH
@@ -66,23 +72,52 @@ then
 	exit
 fi
 
-MYSQLDUMP_STRUCT="mysqldump -d -R --triggers -C --skip-disable-keys --skip-add-locks --skip-lock-tables --single-transaction $CONNECTION_STRING"
-MYSQLDUMP_DATA="mysqldump --replace -t --skip-triggers -C --skip-disable-keys --skip-add-locks --skip-lock-tables --single-transaction $CONNECTION_STRING"
+MYSQLDUMP_STRUCT="mysqldump -d -C --skip-disable-keys --skip-add-locks --skip-lock-tables --single-transaction $CONNECTION_STRING"
+MYSQLDUMP_DATA="mysqldump --net_buffer_length=8k --set-charset --quick --replace -t --skip-triggers -C --skip-disable-keys --skip-add-locks --skip-lock-tables --single-transaction $CONNECTION_STRING"
+
+export MYSQLDUMP_STRUCT MYSQLDUMP_DATA DATA_PATH
+
+function go_mysqldump() {
+    TYPE=$1
+    DATABASE=$(cut -d: -f1 <<< "$2")
+    TABLE=$(cut -d: -f2 <<< "$2")
+
+    CMD=""
+    if [ "$TYPE" = "struct" ]
+    then
+        CMD=$MYSQLDUMP_STRUCT
+    else
+        if [ "$TYPE" = "data" ]
+        then
+            CMD=$MYSQLDUMP_DATA
+        fi
+    fi
+    $CMD $DATABASE $TABLE | lz4 -9 > ${DATA_PATH}/${DATABASE}:${TABLE}_${TYPE}.sql.lz4 || return 1
+}
+export -f go_mysqldump
+
+LOG_FILE=dump.log
+> $LOG_FILE
+
+if [ "$MULTIDATABASES" = "true" ]
+then
+    echo Guessing tables list
+    PARALLEL_TABLE_LIST=""
+    for DATABASE in $DATABASE_LIST
+    do
+        TABLE_LIST=$(mysql --skip-column-names -B $CONNECTION_STRING $DATABASE <<< 'SHOW TABLES')
+        for table in ${TABLE_LIST}
+        do
+            PARALLEL_TABLE_LIST="$PARALLEL_TABLE_LIST ${DATABASE}:${table}"
+        done
+    done
+fi
 
 echo Dumping schema
-if [ "$MULTIDATABASES" = "true" ]
-then
-	parallel --retries 5 --eta --progress --jobs $MAX_THREAD "$MYSQLDUMP_STRUCT {1} | lz4 > ${DATA_PATH}/{1}_struct.sql.lz4" ::: $DATABASE_LIST
-else
-	parallel --retries 5 --eta --progress --jobs $MAX_THREAD "$MYSQLDUMP_STRUCT $DATABASE {1} | lz4 > ${DATA_PATH}/${DATABASE}:{1}_struct.sql.lz4" ::: $TABLE_LIST
-fi
+parallel --retries 5 --eta --progress --jobs $MAX_THREAD --joblog $LOG_FILE "go_mysqldump struct {}" ::: $PARALLEL_TABLE_LIST
+
 echo Dumping data
-if [ "$MULTIDATABASES" = "true" ]
-then
-	parallel --retries 5 --eta --progress --jobs $MAX_THREAD "$MYSQLDUMP_DATA {1} | lz4 > ${DATA_PATH}/{1}_data.sql.lz4" ::: $DATABASE_LIST
-else
-	parallel --retries 5 --eta --progress --jobs $MAX_THREAD "$MYSQLDUMP_DATA $DATABASE {1} | lz4 > ${DATA_PATH}/${DATABASE}:{1}_data.sql.lz4" ::: $TABLE_LIST
-fi
+parallel --retries 5 --eta --progress --jobs $MAX_THREAD --joblog $LOG_FILE "go_mysqldump data {}" ::: $PARALLEL_TABLE_LIST
 
 echo "Time stats :"
 echo "FROM $DATE_DEBUT TO $(date)"
