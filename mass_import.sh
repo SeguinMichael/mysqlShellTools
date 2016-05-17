@@ -72,7 +72,7 @@ then
 	exit
 fi
 
-LS_CMD="ls ${DATA_PATH}/split/"'*'" 2>/dev/null | egrep '(${DATABASE_LIST// /|})(:.*)*_data_[0-9]"'*'".sql'"
+LS_CMD="find ${DATA_PATH}/split/ -iregex '.*\/\(${DATABASE_LIST// /|}\)\(:.*\)*_data_[0-9]"'*'".sql'"
 
 mkdir -p ${DATA_PATH}/split
 
@@ -156,6 +156,7 @@ function go_mysql() {
 		if lsof $FILE
 		then
 			echo "$FILE is currently locked... Will try later."
+            return 1
 		else
 			removeFile=1
 			for key in ${!CONNECTION_STRING_LIST[*]}
@@ -166,8 +167,10 @@ function go_mysql() {
 			if [ "$removeFile" = "1" ]
 			then
 				rm -- $FILE
+                return 0
 			else
 				echo "An error has occured while importing $FILE ... Will try later."
+                return 1
 			fi
 		fi
 	fi
@@ -177,7 +180,8 @@ export -f go_mysql
 echo "[data] Importing 'ready to import' data"
 while [ -n "$(eval $LS_CMD)" ]
 do
-	parallel --retries 5 --eta --progress --jobs $MAX_THREAD --joblog $LOG_FILE "go_mysql {1}" ::: $(eval $LS_CMD | sort -R)
+    eval "$LS_CMD | sort -R" > ${DATA_PATH}/split/todo
+	parallel --retries 5 --eta --progress --jobs $MAX_THREAD --joblog $LOG_FILE "go_mysql {1}" :::: ${DATA_PATH}/split/todo
 	sleep 5
 done
 
@@ -190,10 +194,11 @@ fi
 echo "[data] Importing remaining data"
 while [ -n "$(eval $LS_CMD)" ]
 do
-	parallel --retries 5 --eta --progress --jobs $MAX_THREAD --joblog $LOG_FILE "go_mysql {1}" ::: $(eval $LS_CMD | sort -R)
+    eval "$LS_CMD | sort -R" > ${DATA_PATH}/split/todo
+	parallel --retries 5 --eta --progress --jobs $MAX_THREAD --joblog $LOG_FILE "go_mysql {1}" :::: ${DATA_PATH}/split/todo
 done
 
-rm ${DATA_PATH}/*_header.sql ${DATA_PATH}/*_footer.sql
+rm ${DATA_PATH}/*_header.sql ${DATA_PATH}/*_footer.sql ${DATA_PATH}/split/todo
 
 echo "Time stats :"
 echo "FROM $DATE_DEBUT TO $(date)"
