@@ -73,7 +73,7 @@ then
 fi
 
 MYSQLDUMP_STRUCT="mysqldump -d -C --skip-disable-keys --skip-add-locks --skip-lock-tables --single-transaction $CONNECTION_STRING"
-MYSQLDUMP_DATA="mysqldump --net_buffer_length=8k --set-charset --quick --replace -t --skip-triggers -C --skip-disable-keys --skip-add-locks --skip-lock-tables --single-transaction $CONNECTION_STRING"
+MYSQLDUMP_DATA="mysqldump --net_buffer_length=4096 --set-charset --quick --replace -t --skip-triggers -C --skip-disable-keys --skip-add-locks --skip-lock-tables --single-transaction $CONNECTION_STRING"
 
 export MYSQLDUMP_STRUCT MYSQLDUMP_DATA DATA_PATH
 
@@ -96,7 +96,7 @@ function go_mysqldump() {
 }
 export -f go_mysqldump
 
-LOG_FILE=dump.log
+LOG_FILE=${DATA_PATH}/dump.log
 > $LOG_FILE
 
 if [ "$MULTIDATABASES" = "true" ]
@@ -118,6 +118,13 @@ parallel --retries 5 --eta --progress --jobs $MAX_THREAD --joblog $LOG_FILE "go_
 
 echo Dumping data
 parallel --retries 5 --eta --progress --jobs $MAX_THREAD --joblog $LOG_FILE "go_mysqldump data {}" ::: $PARALLEL_TABLE_LIST
+
+echo "Checking integrity..."
+ls ${DATA_PATH}/*lz4 | while read LZ4_FILE
+do
+lz4 -ft $LZ4_FILE 2>/dev/null || echo "$LZ4_FILE is crashed :("
+done
+echo "Done"
 
 echo "Time stats :"
 echo "FROM $DATE_DEBUT TO $(date)"
