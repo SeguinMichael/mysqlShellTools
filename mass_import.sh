@@ -72,11 +72,11 @@ then
 	exit
 fi
 
-LS_CMD="find ${DATA_PATH}/split/ -iregex '.*\/\(${DATABASE_LIST// /|}\)\(:.*\)*_data_[0-9]"'*'".sql'"
+LS_CMD="find ${DATA_PATH}/split/ -iregex '.*\/\($(sed 's/ /\\|/g' <<< "${DATABASE_LIST}")\)\(:.*\)*_data_[0-9]"'*'".sql'"
 
 mkdir -p ${DATA_PATH}/split
 
-LOG_FILE=import.log
+LOG_FILE=${DATA_PATH}/import.log
 > $LOG_FILE
 
 if [ "$RESUME" = "false" ]
