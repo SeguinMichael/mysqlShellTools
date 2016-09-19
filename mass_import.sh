@@ -100,15 +100,15 @@ then
 		#echo $HEADER_FILE
 		#echo $FOOTER_FILE
 
-		lz4cat ${STRUCT_FILE} | head -n 17 > ${HEADER_FILE}
+		lz4 -dc ${STRUCT_FILE} | head -n 17 > ${HEADER_FILE}
 		echo "SET AUTOCOMMIT=0;" >> ${HEADER_FILE}
 		echo "BEGIN;" >> ${HEADER_FILE}
 		echo "COMMIT;" > ${FOOTER_FILE}
 
 		#Perf => assuming struct footer is similar to data footer
-		lz4cat ${STRUCT_FILE} | tail -n 11 >> ${FOOTER_FILE}
+		lz4 -dc ${STRUCT_FILE} | tail -n 11 >> ${FOOTER_FILE}
 
-		lz4cat ${DATA_FILE} | split -a 6 -d -l 5 -u --additional-suffix=.sql - ${DATA_PATH}/split/${ID}_data_
+		lz4 -dc ${DATA_FILE} | split -a 6 -d -l 5 -u --additional-suffix=.sql - ${DATA_PATH}/split/${ID}_data_
 	done &
 	PID_SPLIT=$!
 	echo split PID = $PID_SPLIT
@@ -130,8 +130,8 @@ then
 		echo "[schema] $ID (2 times per server with -f in case of critical table dependencies) ..."
 		for key in ${!CONNECTION_STRING_LIST[*]}
 		do
-			lz4cat ${STRUCT_FILE} | $MYSQL_CMD ${CONNECTION_STRING_LIST[$key]} -f $DATABASE
-			lz4cat ${STRUCT_FILE} | $MYSQL_CMD ${CONNECTION_STRING_LIST[$key]} -f $DATABASE
+			lz4 -dc ${STRUCT_FILE} | $MYSQL_CMD ${CONNECTION_STRING_LIST[$key]} -f $DATABASE
+			lz4 -dc ${STRUCT_FILE} | $MYSQL_CMD ${CONNECTION_STRING_LIST[$key]} -f $DATABASE
 		done
 
 		echo "[schema] $ID ok"
