@@ -73,7 +73,7 @@ then
 fi
 
 MYSQLDUMP_STRUCT="mysqldump -d -C --skip-disable-keys --skip-add-locks --skip-lock-tables --single-transaction $CONNECTION_STRING"
-MYSQLDUMP_DATA="mysqldump --net_buffer_length=4096 --set-charset --quick --replace -t --skip-triggers -C --skip-disable-keys --skip-add-locks --skip-lock-tables --single-transaction $CONNECTION_STRING"
+MYSQLDUMP_DATA="mysqldump --net_buffer_length=6144 --set-charset --quick --replace -t --skip-triggers -C --skip-disable-keys --skip-add-locks --skip-lock-tables --single-transaction $CONNECTION_STRING"
 
 export MYSQLDUMP_STRUCT MYSQLDUMP_DATA DATA_PATH
 

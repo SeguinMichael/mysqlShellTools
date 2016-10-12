@@ -87,7 +87,7 @@ then
 		rm -- $FILE
 	done
 	echo "[data] Splitting data files in background..."
-	for FILE in $(ls ${DATA_PATH}/*lz4 2>/dev/null | egrep "(${DATABASE_LIST// /|})(:.*)*_struct.sql.lz4")
+	( for FILE in $(ls ${DATA_PATH}/*lz4 2>/dev/null | egrep "(${DATABASE_LIST// /|})(:.*)*_struct.sql.lz4")
 	do
 		STRUCT_FILE=$FILE
 		DATA_FILE=${FILE/_struct.sql.lz4/_data.sql.lz4}
@@ -105,14 +105,14 @@ then
 		echo "BEGIN;" >> ${HEADER_FILE}
 		echo "COMMIT;" > ${FOOTER_FILE}
 
-		#Perf => assuming struct footer is similar to data footer
+		#Perf => assuming that struct footer is similar to the data footer
 		lz4 -dc ${STRUCT_FILE} | tail -n 11 >> ${FOOTER_FILE}
 
 		lz4 -dc ${DATA_FILE} | split -a 6 -d -l 5 -u --additional-suffix=.sql - ${DATA_PATH}/split/${ID}_data_
-	done &
+	done && echo 'Split finished normally. Resume is safe' ) &
 	PID_SPLIT=$!
 	echo split PID = $PID_SPLIT
-	trap "{ ps $PID_SPLIT >/dev/null && ( kill $PID_SPLIT ; echo 'Split killed' ) || echo 'Split finished normally. Resume is safe' ; exit 255; }" SIGTERM SIGKILL SIGABRT EXIT
+	trap "{ ps $PID_SPLIT >/dev/null && ( kill $PID_SPLIT ; echo 'Split killed : resume is not safe' ) ; exit 255; }" SIGTERM SIGKILL SIGABRT EXIT
 fi
 
 echo "Warning: the specified databases will be restored in 10 seconds"
