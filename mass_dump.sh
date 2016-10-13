@@ -1,13 +1,13 @@
 #!/bin/bash
 
 function usage() {
-	echo "
-	Usage :
-		./mass_dump.sh [OPTIONS] extra arguments
-			-d DATA_PATH <= directory to the data storage
-			-n MAX_THREAD <= Multithreading mode
-			-s \"-h server1 -uroot\" <= server1
-			-B <= use extra arguments as database list instead of database_name and tables (mysqldump syntax)
+    echo "
+    Usage :
+        ./mass_dump.sh [OPTIONS] extra arguments
+            -d DATA_PATH <= directory to the data storage
+            -n MAX_THREAD <= Multithreading mode
+            -s \"-h server1 -uroot\" <= connection string to send to mysqldymp
+            -B <= use extra arguments as database list instead of database_name and tables (mysqldump syntax)
 "
 
 }
@@ -20,27 +20,27 @@ MULTIDATABASES="false"
 
 while getopts "hd:n:Bs:" option
 do
-	case $option in
-		h)
-			usage
-			exit
-			;;
-		d)
-			DATA_PATH=$OPTARG
-			;;
-		n)
-			MAX_THREAD=$OPTARG
-			;;
-		B)
-			MULTIDATABASES="true"
-			;;
-		s)
-			CONNECTION_STRING=$OPTARG
-			;;
-		\?)
-			exit 1
-			;;
-	esac
+    case $option in
+        h)
+            usage
+            exit
+            ;;
+        d)
+            DATA_PATH=$OPTARG
+            ;;
+        n)
+            MAX_THREAD=$OPTARG
+            ;;
+        B)
+            MULTIDATABASES="true"
+            ;;
+        s)
+            CONNECTION_STRING=$OPTARG
+            ;;
+        \?)
+            exit 1
+            ;;
+    esac
 done
 shift $((OPTIND-1))
 
@@ -51,11 +51,11 @@ echo ___ multi databases : $MULTIDATABASES
 
 if [ "$MULTIDATABASES" = "true" ]
 then
-	DATABASE_LIST=$@
+    DATABASE_LIST=$@
 else
-	DATABASE=$1
-	shift
-	TABLE_LIST=$@
+    DATABASE=$1
+    shift
+    TABLE_LIST=$@
 
     PARALLEL_TABLE_LIST=""
     for table in ${TABLE_LIST}
@@ -68,8 +68,8 @@ mkdir -p $DATA_PATH
 
 if [ -z "$DATA_PATH" -o -z "$MAX_THREAD" -o -z "$MULTIDATABASES" -o -z "$CONNECTION_STRING" ]
 then
-	usage
-	exit
+    usage
+    exit
 fi
 
 MYSQLDUMP_STRUCT="mysqldump -d -C --skip-disable-keys --skip-add-locks --skip-lock-tables --single-transaction $CONNECTION_STRING"
