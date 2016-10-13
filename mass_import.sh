@@ -27,7 +27,7 @@ declare -a CONNECTION_STRING_LIST
 EXPORT_CONNECTION_STRING_LIST=""
 
 CONNECTION_STRING_LIST=()
-while getopts "hd:n:rs:" option
+while getopts "hd:n:rts:" option
 do
     case $option in
         h)
