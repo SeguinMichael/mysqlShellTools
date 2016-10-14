@@ -48,6 +48,7 @@ echo Options activated :
 echo ___ data path : $DATA_PATH
 echo ___ max threads : $MAX_THREAD
 echo ___ multi databases : $MULTIDATABASES
+echo ___ connection : $CONNECTION_STRING
 
 if [ "$MULTIDATABASES" = "true" ]
 then
@@ -92,7 +93,7 @@ function go_mysqldump() {
             CMD=$MYSQLDUMP_DATA
         fi
     fi
-    $CMD $DATABASE $TABLE | lz4 -9 > ${DATA_PATH}/${DATABASE}:${TABLE}_${TYPE}.sql.lz4 || return 1
+    eval "$CMD $DATABASE $TABLE | lz4 -9 > ${DATA_PATH}/${DATABASE}:${TABLE}_${TYPE}.sql.lz4 || return 1"
 }
 export -f go_mysqldump
 

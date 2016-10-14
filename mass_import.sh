@@ -167,7 +167,7 @@ function go_mysql() {
             for key in "${!CONNECTION_STRING_LIST[*]}"
             do
                 #echo Sending to \'${CONNECTION_STRING_LIST[$key]}\' ...
-                cat ${DATA_PATH}/${ID}_header.sql $FILE ${DATA_PATH}/${ID}_footer.sql | $MYSQL_CMD ${CONNECTION_STRING_LIST[$key]} $DATABASE || removeFile=0
+                eval "cat ${DATA_PATH}/${ID}_header.sql $FILE ${DATA_PATH}/${ID}_footer.sql | $MYSQL_CMD ${CONNECTION_STRING_LIST[$key]} $DATABASE || removeFile=0"
             done
             if [ "$removeFile" = "1" ]
             then
