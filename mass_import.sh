@@ -60,6 +60,7 @@ echo Options activated :
 echo ___ data path : $DATA_PATH
 echo ___ resume : $RESUME
 echo ___ max threads : $MAX_THREAD
+echo ___ structure : $STRUCTURE
 for key in "${!CONNECTION_STRING_LIST[*]}"
 do
     echo ___ connection : ${CONNECTION_STRING_LIST[$key]}
@@ -100,12 +101,10 @@ then
         FOOTER_FILE=${FILE/_struct.sql.lz4/_footer.sql}
         ID=$(basename $STRUCT_FILE | sed "s/_struct.sql.lz4$//")
 
-        #echo $STRUCT_FILE
-        #echo $DATA_FILE
-        #echo $HEADER_FILE
-        #echo $FOOTER_FILE
-
-        lz4 -dc ${STRUCT_FILE} | head -n 17 > ${HEADER_FILE}
+        #Building header file
+        #source is struct file (17th first lines)
+        #we just remove the UNIQUE_CHECKS=0 option because "replace into" is used
+        lz4 -dc ${STRUCT_FILE} | head -n 17 | sed "s/UNIQUE_CHECKS=0/UNIQUE_CHECKS=1/" > ${HEADER_FILE}
         echo "SET AUTOCOMMIT=0;" >> ${HEADER_FILE}
         echo "BEGIN;" >> ${HEADER_FILE}
         echo "COMMIT;" > ${FOOTER_FILE}
