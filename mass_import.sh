@@ -17,7 +17,7 @@ function usage() {
 
 DATE_DEBUT=$(date)
 
-MYSQL_CMD="mysql -C "
+MYSQL_CMD="mysql -C"
 RESUME="false"
 MAX_THREAD=1
 DATA_PATH="/data/sqlDump"

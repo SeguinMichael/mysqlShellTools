@@ -65,13 +65,13 @@ else
     done
 fi
 
-mkdir -p $DATA_PATH
-
 if [ -z "$DATA_PATH" -o -z "$MAX_THREAD" -o -z "$MULTIDATABASES" -o -z "$CONNECTION_STRING" ]
 then
     usage
     exit
 fi
+
+mkdir -p $DATA_PATH
 
 MYSQLDUMP_STRUCT="mysqldump -d -C --skip-disable-keys --skip-add-locks --skip-lock-tables --single-transaction $CONNECTION_STRING"
 MYSQLDUMP_DATA="mysqldump --net_buffer_length=6144 --set-charset --quick --replace -t --skip-triggers -C --skip-disable-keys --skip-add-locks --skip-lock-tables --single-transaction $CONNECTION_STRING"
