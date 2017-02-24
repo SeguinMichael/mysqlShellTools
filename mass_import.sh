@@ -61,7 +61,7 @@ echo ___ data path : $DATA_PATH
 echo ___ resume : $RESUME
 echo ___ max threads : $MAX_THREAD
 echo ___ structure : $STRUCTURE
-for key in "${!CONNECTION_STRING_LIST[*]}"
+for key in ${!CONNECTION_STRING_LIST[*]}
 do
     echo ___ connection : ${CONNECTION_STRING_LIST[$key]}
 done
@@ -132,7 +132,7 @@ then
         DATABASE=$(cut -d: -f1 <<< "$ID")
 
         echo "[schema] $ID (2 times per server with -f in case of critical table dependencies) ..."
-        for key in "${!CONNECTION_STRING_LIST[*]}"
+        for key in ${!CONNECTION_STRING_LIST[*]}
         do
             lz4 -dc ${STRUCT_FILE} | $MYSQL_CMD ${CONNECTION_STRING_LIST[$key]} -f $DATABASE
             lz4 -dc ${STRUCT_FILE} | $MYSQL_CMD ${CONNECTION_STRING_LIST[$key]} -f $DATABASE
@@ -163,7 +163,7 @@ function go_mysql() {
             return 1
         else
             removeFile=1
-            for key in "${!CONNECTION_STRING_LIST[*]}"
+            for key in ${!CONNECTION_STRING_LIST[*]}
             do
                 #echo Sending to \'${CONNECTION_STRING_LIST[$key]}\' ...
                 eval "cat ${DATA_PATH}/${ID}_header.sql $FILE ${DATA_PATH}/${ID}_footer.sql | $MYSQL_CMD ${CONNECTION_STRING_LIST[$key]} $DATABASE || removeFile=0"
