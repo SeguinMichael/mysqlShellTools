@@ -181,6 +181,7 @@ function go_mysql() {
 }
 export -f go_mysql
 
+#While there are files to parse...
 echo "[data] Importing 'ready to import' data"
 while [ -n "$(eval $LS_CMD)" ]
 do
@@ -189,12 +190,14 @@ do
     sleep 5
 done
 
+#No more files but split still running
 if [ "$RESUME" = "false" ]
 then
     echo "Waiting for split..."
     wait $PID_SPLIT
 fi
 
+#At least, import remaining files
 echo "[data] Importing remaining data"
 while [ -n "$(eval $LS_CMD)" ]
 do
@@ -202,7 +205,14 @@ do
     parallel --retries 5 --eta --progress --jobs $MAX_THREAD --joblog $LOG_FILE "go_mysql {1}" :::: ${DATA_PATH}/split/todo
 done
 
-rm ${DATA_PATH}/*_header.sql ${DATA_PATH}/*_footer.sql ${DATA_PATH}/split/todo
+# Cleaning workspace ...
+for FILE in $(ls ${DATA_PATH}/*lz4 2>/dev/null | egrep "(${DATABASE_LIST// /|})(:.*)*_struct.sql.lz4")
+do
+    HEADER_FILE=${FILE/_struct.sql.lz4/_header.sql}
+    FOOTER_FILE=${FILE/_struct.sql.lz4/_footer.sql}
+    rm $HEADER_FILE $FOOTER_FILE
+done
+rm ${DATA_PATH}/split/todo
 
 echo "Time stats :"
 echo "FROM $DATE_DEBUT TO $(date)"
