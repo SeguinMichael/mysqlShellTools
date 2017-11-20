@@ -63,6 +63,11 @@ else
     do
         PARALLEL_TABLE_LIST="$PARALLEL_TABLE_LIST ${DATABASE}:${table}"
     done
+    if [ "$PARALLEL_TABLE_LIST" = "" ]
+    then
+        usage
+        exit
+    fi
 fi
 
 if [ -z "$DATA_PATH" -o -z "$MAX_THREAD" -o -z "$MULTIDATABASES" -o -z "$CONNECTION_STRING" ]
