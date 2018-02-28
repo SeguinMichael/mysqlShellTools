@@ -4,32 +4,48 @@ function usage() {
     echo "
     Usage :
         ./mass_dump.sh [OPTIONS] extra arguments
+            -h <= this help
+            -i <= incremental mode (append data to datafiles)
+            -l z|t|n <= display type : z(enity) / t(erminal) / n(one)
             -d DATA_PATH <= directory to the data storage
             -n MAX_THREAD <= Multithreading mode
-            -s \"-h server1 -uroot\" <= connection string to send to mysqldymp
+            -c <= don't check dump files
             -B <= use extra arguments as database list instead of database_name and tables (mysqldump syntax)
+            -s \"-h server1 -uroot\" <= connection string to send to mysqldump
 "
 
 }
 
 DATE_DEBUT=$(date)
 
-MAX_THREAD=1
+INCREMENTAL="false"
+QUIET="false"
 DATA_PATH="/data/sqlDump"
+MAX_THREAD=1
+DISPLAY_TO="z"
 MULTIDATABASES="false"
 
-while getopts "hd:n:Bs:" option
+while getopts "hil:d:n:cBs:" option
 do
     case $option in
         h)
             usage
             exit
             ;;
+        i)
+            INCREMENTAL="true"
+            ;;
+        l)
+            DISPLAY_TO=$OPTARG
+            ;;
         d)
             DATA_PATH=$OPTARG
             ;;
         n)
             MAX_THREAD=$OPTARG
+            ;;
+        c)
+            DONTCHECK="true"
             ;;
         B)
             MULTIDATABASES="true"
@@ -44,11 +60,22 @@ do
 done
 shift $((OPTIND-1))
 
-echo Options activated :
-echo ___ data path : $DATA_PATH
-echo ___ max threads : $MAX_THREAD
-echo ___ multi databases : $MULTIDATABASES
-echo ___ connection : $CONNECTION_STRING
+if [[ "$DISPLAY_TO" = "z" && ( -z "$DISPLAY" || -z "$(command -v zenity)" ) ]]
+then
+    DISPLAY_TO="t"
+fi
+
+if [ ! "$DISPLAY_TO" = "n" ]
+then
+    echo Options activated :
+    echo ___ incremental : $INCREMENTAL
+    echo ___ display type : $DISPLAY_TO
+    echo ___ data path : $DATA_PATH
+    echo ___ max threads : $MAX_THREAD
+    echo ___ don\'t check files : $DONTCHECK
+    echo ___ multi databases : $MULTIDATABASES
+    echo ___ connection : $CONNECTION_STRING
+fi
 
 if [ "$MULTIDATABASES" = "true" ]
 then
@@ -70,6 +97,7 @@ else
     fi
 fi
 
+#checking mandatory options
 if [ -z "$DATA_PATH" -o -z "$MAX_THREAD" -o -z "$MULTIDATABASES" -o -z "$CONNECTION_STRING" ]
 then
     usage
@@ -81,7 +109,23 @@ mkdir -p $DATA_PATH
 MYSQLDUMP_STRUCT="mysqldump -d -C --skip-disable-keys --skip-add-locks --skip-lock-tables --single-transaction $CONNECTION_STRING"
 MYSQLDUMP_DATA="mysqldump --net_buffer_length=6144 --set-charset --quick --replace -t --skip-triggers -C --skip-disable-keys --skip-add-locks --skip-lock-tables --single-transaction $CONNECTION_STRING"
 
-export MYSQLDUMP_STRUCT MYSQLDUMP_DATA DATA_PATH
+LOG_FILE=${DATA_PATH}/dump.log
+if [ "$INCREMENTAL" = "false" ]
+then
+    > $LOG_FILE
+fi
+
+PARALLEL_OPTIONS="--silent --will-cite --retries 5 --jobs $MAX_THREAD --joblog $LOG_FILE "
+if [ ! "$DISPLAY_TO" = "n" ]
+then
+    PARALLEL_OPTIONS="$PARALLEL_OPTIONS --eta --progress "
+fi
+if [ "$DISPLAY_TO" = "z" ]
+then
+    PARALLEL_OPTIONS="$PARALLEL_OPTIONS --bar "
+fi
+
+export MYSQLDUMP_STRUCT MYSQLDUMP_DATA DATA_PATH INCREMENTAL
 
 function go_mysqldump() {
     TYPE=$1
@@ -89,6 +133,7 @@ function go_mysqldump() {
     TABLE=$(cut -d: -f2 <<< "$2")
 
     CMD=""
+    REDIRECTION=">"
     if [ "$TYPE" = "struct" ]
     then
         CMD=$MYSQLDUMP_STRUCT
@@ -96,18 +141,23 @@ function go_mysqldump() {
         if [ "$TYPE" = "data" ]
         then
             CMD=$MYSQLDUMP_DATA
+            if [ "$INCREMENTAL" = "true" ]
+            then
+                REDIRECTION=">>"
+            fi
         fi
     fi
-    eval "$CMD $DATABASE $TABLE | lz4 -9 > ${DATA_PATH}/${DATABASE}:${TABLE}_${TYPE}.sql.lz4 || return 1"
+    flock --exclusive --close --wait 5 ${DATA_PATH}/${DATABASE}:${TABLE}_${TYPE}.sql.lz4 sh -c \
+    "eval \"$CMD $DATABASE $TABLE | lz4 -9 $REDIRECTION ${DATA_PATH}/${DATABASE}:${TABLE}_${TYPE}.sql.lz4 || return 1\""
 }
 export -f go_mysqldump
 
-LOG_FILE=${DATA_PATH}/dump.log
-> $LOG_FILE
-
 if [ "$MULTIDATABASES" = "true" ]
 then
-    echo Guessing tables list
+    if [ ! "$DISPLAY_TO" = "n" ]
+    then
+        echo Guessing tables list
+    fi
     PARALLEL_TABLE_LIST=""
     for DATABASE in $DATABASE_LIST
     do
@@ -119,18 +169,46 @@ then
     done
 fi
 
-echo Dumping schema
-parallel --retries 5 --eta --progress --jobs $MAX_THREAD --joblog $LOG_FILE "go_mysqldump struct {}" ::: $PARALLEL_TABLE_LIST
+if [ ! "$DISPLAY_TO" = "n" ]
+then
+    echo Dumping schema
+fi
+if [ "$DISPLAY_TO" = "z" ]
+then
+    parallel $PARALLEL_OPTIONS "go_mysqldump struct {}" ::: $PARALLEL_TABLE_LIST 2> >(zenity --progress --auto-kill --auto-close --no-cancel)
+else
+    parallel $PARALLEL_OPTIONS "go_mysqldump struct {}" ::: $PARALLEL_TABLE_LIST
+fi
 
-echo Dumping data
-parallel --retries 5 --eta --progress --jobs $MAX_THREAD --joblog $LOG_FILE "go_mysqldump data {}" ::: $PARALLEL_TABLE_LIST
+if [ ! "$DISPLAY_TO" = "n" ]
+then
+    echo Dumping data
+fi
+if [ "$DISPLAY_TO" = "z" ]
+then
+    parallel $PARALLEL_OPTIONS "go_mysqldump data {}" ::: $PARALLEL_TABLE_LIST 2> >(zenity --progress --auto-kill --auto-close --no-cancel)
+else
+    parallel $PARALLEL_OPTIONS "go_mysqldump data {}" ::: $PARALLEL_TABLE_LIST
+fi
 
-echo "Checking integrity..."
-ls ${DATA_PATH}/*lz4 | while read LZ4_FILE
-do
-lz4 -ft $LZ4_FILE 2>/dev/null || echo "$LZ4_FILE is crashed :("
-done
-echo "Done"
+if [ "$DONTCHECK" = "false" ]
+then
+    if [ ! "$DISPLAY_TO" = "n" ]
+    then
+        echo "Checking integrity..."
+    fi
+    ls ${DATA_PATH}/*lz4 | while read LZ4_FILE
+    do
+        lz4 -ft $LZ4_FILE 2>/dev/null || echo "$LZ4_FILE is crashed :("
+    done
+    if [ ! "$DISPLAY_TO" = "n" ]
+    then
+        echo "Done"
+    fi
+fi
 
-echo "Time stats :"
-echo "FROM $DATE_DEBUT TO $(date)"
+if [ ! "$DISPLAY_TO" = "n" ]
+then
+    echo "Time stats :"
+    echo "FROM $DATE_DEBUT TO $(date)"
+fi
