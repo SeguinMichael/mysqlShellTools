@@ -10,22 +10,24 @@ function usage() {
             -d DATA_PATH <= directory to the data storage
             -n MAX_THREAD <= Multithreading mode
             -c <= don't check dump files
+            -t <= no create info
             -B <= use extra arguments as database list instead of database_name and tables (mysqldump syntax)
             -s \"-h server1 -uroot\" <= connection string to send to mysqldump
 "
 
 }
 
-DATE_DEBUT=$(date)
+DATE_DEBUT=$(date +"%Y-%m-%d %H:%M:%S")
 
 INCREMENTAL="false"
-QUIET="false"
+DISPLAY_TO="z"
 DATA_PATH="/data/sqlDump"
 MAX_THREAD=1
-DISPLAY_TO="z"
+DONTCHECK="false"
+DATA_ONLY="false"
 MULTIDATABASES="false"
 
-while getopts "hil:d:n:cBs:" option
+while getopts "hil:d:n:ctBs:" option
 do
     case $option in
         h)
@@ -46,6 +48,9 @@ do
             ;;
         c)
             DONTCHECK="true"
+            ;;
+        t)
+            DATA_ONLY="true"
             ;;
         B)
             MULTIDATABASES="true"
@@ -73,6 +78,7 @@ then
     echo ___ data path : $DATA_PATH
     echo ___ max threads : $MAX_THREAD
     echo ___ don\'t check files : $DONTCHECK
+    echo ___ no create info : $DATA_ONLY
     echo ___ multi databases : $MULTIDATABASES
     echo ___ connection : $CONNECTION_STRING
 fi
@@ -147,17 +153,14 @@ function go_mysqldump() {
             fi
         fi
     fi
-    flock --exclusive --close --wait 5 ${DATA_PATH}/${DATABASE}:${TABLE}_${TYPE}.sql.lz4 sh -c \
+    flock --no-fork --exclusive --wait 5 ${DATA_PATH}/${DATABASE}:${TABLE}_${TYPE}.sql.lz4 sh -c \
     "eval \"$CMD $DATABASE $TABLE | lz4 -9 $REDIRECTION ${DATA_PATH}/${DATABASE}:${TABLE}_${TYPE}.sql.lz4 || return 1\""
 }
 export -f go_mysqldump
 
 if [ "$MULTIDATABASES" = "true" ]
 then
-    if [ ! "$DISPLAY_TO" = "n" ]
-    then
-        echo Guessing tables list
-    fi
+    [ ! "$DISPLAY_TO" = "n" ] && echo "Guessing tables list"
     PARALLEL_TABLE_LIST=""
     for DATABASE in $DATABASE_LIST
     do
@@ -169,21 +172,18 @@ then
     done
 fi
 
-if [ ! "$DISPLAY_TO" = "n" ]
+if [ "$DATA_ONLY" = "false" ]
 then
-    echo Dumping schema
-fi
-if [ "$DISPLAY_TO" = "z" ]
-then
-    parallel $PARALLEL_OPTIONS "go_mysqldump struct {}" ::: $PARALLEL_TABLE_LIST 2> >(zenity --progress --auto-kill --auto-close --no-cancel)
-else
-    parallel $PARALLEL_OPTIONS "go_mysqldump struct {}" ::: $PARALLEL_TABLE_LIST
+    [ ! "$DISPLAY_TO" = "n" ] && echo "Dumping schema"
+    if [ "$DISPLAY_TO" = "z" ]
+    then
+        parallel $PARALLEL_OPTIONS "go_mysqldump struct {}" ::: $PARALLEL_TABLE_LIST 2> >(zenity --progress --auto-kill --auto-close --no-cancel)
+    else
+        parallel $PARALLEL_OPTIONS "go_mysqldump struct {}" ::: $PARALLEL_TABLE_LIST
+    fi
 fi
 
-if [ ! "$DISPLAY_TO" = "n" ]
-then
-    echo Dumping data
-fi
+[ ! "$DISPLAY_TO" = "n" ] && echo "Dumping data"
 if [ "$DISPLAY_TO" = "z" ]
 then
     parallel $PARALLEL_OPTIONS "go_mysqldump data {}" ::: $PARALLEL_TABLE_LIST 2> >(zenity --progress --auto-kill --auto-close --no-cancel)
@@ -193,22 +193,13 @@ fi
 
 if [ "$DONTCHECK" = "false" ]
 then
-    if [ ! "$DISPLAY_TO" = "n" ]
-    then
-        echo "Checking integrity..."
-    fi
+    [ ! "$DISPLAY_TO" = "n" ] && echo "Checking integrity..."
     ls ${DATA_PATH}/*lz4 | while read LZ4_FILE
     do
-        lz4 -ft $LZ4_FILE 2>/dev/null || echo "$LZ4_FILE is crashed :("
+        lz4 -ft $LZ4_FILE 2>/dev/null || echo "$LZ4_FILE is crashed :(" >&2
     done
-    if [ ! "$DISPLAY_TO" = "n" ]
-    then
-        echo "Done"
-    fi
+    [ ! "$DISPLAY_TO" = "n" ] && echo "Done"
 fi
 
-if [ ! "$DISPLAY_TO" = "n" ]
-then
-    echo "Time stats :"
-    echo "FROM $DATE_DEBUT TO $(date)"
-fi
+[ ! "$DISPLAY_TO" = "n" ] && echo -e "Started at $DATE_DEBUT\nEnded at $(date +"%Y-%m-%d %H:%M:%S")"
+exit 0
