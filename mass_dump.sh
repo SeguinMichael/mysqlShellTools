@@ -153,8 +153,10 @@ function go_mysqldump() {
             fi
         fi
     fi
+
     flock --exclusive --wait 5 ${DATA_PATH}/${DATABASE}:${TABLE}_${TYPE}.sql.lz4 sh -c \
-    "eval \"$CMD $DATABASE $TABLE | lz4 -9 $REDIRECTION ${DATA_PATH}/${DATABASE}:${TABLE}_${TYPE}.sql.lz4 || return 1\""
+    "$CMD $DATABASE $TABLE | lz4 -9 $REDIRECTION ${DATA_PATH}/${DATABASE}:${TABLE}_${TYPE}.sql.lz4 ; exit ${PIPESTATUS[0]}"
+    return $?
 }
 export -f go_mysqldump
 
